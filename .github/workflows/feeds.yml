@@ -24,10 +24,17 @@ env:
   TARGET_BRANCH: OCO
   OCO_REPO: https://github.com/oSoWoSo/vOid_Community_repOsitory.git
   OCO_LABEL: package-update
+  # feedsparser defaults to "feeds.opml" in its own root, which does not exist
+  # here, so it would fall back to fetching the OPML from raw.githubusercontent
+  # -- while the very same file sits in the OCO checkout one step up. Reading
+  # the clone also closes the window where the remote OPML and the templates
+  # we compare against come from two different moments in time.
+  OPML_PATH: ${{ runner.temp }}/oco/src/feed.opml
 
 jobs:
   package-update:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout feeds
@@ -42,18 +49,19 @@ jobs:
             "$RUNNER_TEMP/oco"
 
       - name: Install dependencies
-        run: |
-          python3 -m venv "$RUNNER_TEMP/package-update-venv"
-          "$RUNNER_TEMP/package-update-venv/bin/pip" \
-            install \
-            --disable-pip-version-check \
-            feedparser \
-            packaging
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - run: python3 -m pip install -r requirements.txt
 
       - name: Check package updates
         env:
           GH_TOKEN: ${{ secrets.BOT }}
-          PYTHON: ${{ runner.temp }}/package-update-venv/bin/python
+          GITHUB_TOKEN: ${{ secrets.BOT }}
+          CODEBERG_TOKEN: ${{ secrets.CODEBERG }}
+          GITLAB_TOKEN: ${{ secrets.GITLAB }}
           DRY_RUN: ${{ inputs.dry_run }}
-        run: |
-          "$PYTHON" .github/feedsparser.py
+        run: python3 .github/feedsparser.py

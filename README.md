@@ -2,7 +2,7 @@
 
 Bootstrap Docker images for building binary packages for [repo.osowoso.org](https://repo.osowoso.org/)
 
-Templates live at [OCO](https://codeberg.org/oSoWoSo/oco), binaries are built via CI on [GitHub](https://github.com/oSoWoSo/vOid_Community_repOsitory) using these images.
+Templates live at [OCO](https://github.com/oSoWoSo/vOid_Community_repOsitory) (mirrored to [Codeberg](https://codeberg.org/oSoWoSo/oco)); binaries are built via CI on GitHub using these images.
 
 ## Images
 
@@ -24,7 +24,7 @@ docker run --privileged --rm ghcr.io/osowoso/oco-builder-x86_64 \
 
 ## How it works
 
-Each image starts from the official `ghcr.io/void-linux/void-*-full` base, runs `xbps-src binary-bootstrap` with `--privileged` (required for chroot mount capabilities), then is committed as a ready-to-use build environment.
+Each image starts from the official `ghcr.io/void-linux/void-*-full` base — pinned by digest in `.github/workflows/build.yml` — runs `xbps-src binary-bootstrap` with `--privileged` (required for chroot mount capabilities), then is smoke tested and committed as a ready-to-use build environment. Every image also carries a `base-<digest>` tag naming the Void release it was built from.
 
 ## Bundled tools
 
@@ -38,3 +38,15 @@ In addition to the void base + `xbps-src`, the images include:
 
 x86\_64 only
 - `pandoc` -- README → HTML for the oco website generator
+
+## CI secrets
+
+`.github/workflows/feeds.yml` reads these. Only `BOT` is required; the rest
+are optional and an unset token means "fetch anonymously", which is what
+happened before they existed.
+
+| Secret | Used for |
+|--------|----------|
+| `BOT` | `gh` CLI operations against the OCO repo — filing and updating `package-update` issues — and the GitHub entry in `feedsparser.py`'s `HOST_AUTH` |
+| `CODEBERG` | Codeberg feeds (`Authorization: token`) |
+| `GITLAB` | GitLab feeds (`PRIVATE-TOKEN`) |

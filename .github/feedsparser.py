@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -12,7 +13,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import feedparser
-from packaging.version import InvalidVersion, Version
 
 
 OPML_PATH = os.environ.get(
@@ -37,15 +37,64 @@ DRY_RUN = os.environ.get(
 )
 
 OCO_DIR = Path(
-    os.environ["RUNNER_TEMP"]
-) / "oco"
+    os.environ.get("OCO_DIR")
+    or Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "oco"
+)
 
-README_FILE = OCO_DIR / "README.md"
 SRC_PKGS = OCO_DIR / "srcpkgs"
+
+AUTOBUMP_PKGS = OCO_DIR / "src" / "autobump-pkgs"
 
 TARGET_REPO = os.environ["TARGET_REPO"]
 ISSUE_LABEL = os.environ["OCO_LABEL"]
 
+# Per-forge credentials for feed fetching.
+HOST_AUTH = (
+    (
+        (
+            "github.com",
+            "raw.githubusercontent.com",
+            "api.github.com",
+        ),
+        ("GITHUB_TOKEN", "GH_TOKEN"),
+        "Authorization",
+        "Bearer {token}",
+    ),
+    (
+        ("codeberg.org",),
+        ("CODEBERG_TOKEN",),
+        "Authorization",
+        "token {token}",
+    ),
+    (
+        ("gitlab.com", "gitlab.freedesktop.org"),
+        ("GITLAB_TOKEN",),
+        "PRIVATE-TOKEN",
+        "{token}",
+    ),
+)
+
+DEFAULT_HEADERS = {
+    "User-Agent": "package-update-github-action/1.0",
+}
+
+
+def auth_headers(url):
+    """Return the Authorization-style header for `url`, if we hold a token
+    for that forge. Empty dict means "fetch anonymously"."""
+    host = urllib.parse.urlparse(url).hostname or ""
+
+    for domains, env_names, header, template in HOST_AUTH:
+        for domain in domains:
+            if host != domain and not host.endswith("." + domain):
+                continue
+
+            for env_name in env_names:
+                token = os.environ.get(env_name, "").strip()
+                if token:
+                    return {header: template.format(token=token)}
+            return {}
+    return {}
 PACKAGES_BY_NAME = {}
 
 
@@ -55,6 +104,14 @@ VERSION_RE = re.compile(
     r"(\d+(?:\.\d+){0,5}"
     r"(?:[-+._][0-9A-Za-z.-]+)?)"
 )
+
+SEPARATOR_RANK = {
+    ".": 0,
+    "_": 0,
+    "+": 0,
+    "-": 0,
+    "~": 1,
+}
 
 
 def log(state, name, detail=""):
@@ -83,6 +140,79 @@ def run_gh(args):
     return result.stdout
 
 
+def version_key(text):
+    """Sort key with the same semantics detect-update.sh applies.
+    """
+
+    tokens = re.split(
+        r"([.\-_+~]+)",
+        text.strip().lstrip("vV"),
+    )
+
+    key = []
+    rank = 0
+
+    for index, token in enumerate(tokens):
+        if index % 2:
+            rank = max(
+                SEPARATOR_RANK[separator]
+                for separator in token
+            )
+            continue
+
+        if not token:
+            continue
+
+        if token.isdigit():
+            key.append((1, int(token), rank))
+        else:
+            key.append((0, 0, token))
+
+        rank = 0
+
+    # 1.0 == 1.0.0 for xbps.
+    while key and key[-1] == (1, 0, 0):
+        key.pop()
+
+    return key
+
+
+class XbpsVersion:
+    """Comparable version string using xbps ordering."""
+
+    __slots__ = ("text", "key")
+
+    def __init__(self, text):
+        self.text = text
+        self.key = version_key(text)
+
+    def __eq__(self, other):
+        return self.key == other.key
+
+    def __lt__(self, other):
+        return self.key < other.key
+
+    def __le__(self, other):
+        return self.key <= other.key
+
+    def __gt__(self, other):
+        return self.key > other.key
+
+    def __ge__(self, other):
+        return self.key >= other.key
+
+    def __hash__(self):
+        return hash(self.text)
+
+    def __str__(self):
+        return self.text
+
+    def __repr__(self):
+        return (
+            f"XbpsVersion({self.text!r})"
+        )
+
+
 def extract_version(text):
     if not text:
         return None
@@ -94,23 +224,7 @@ def extract_version(text):
 
     raw = match.group(1)
 
-    try:
-        return Version(raw)
-    except InvalidVersion:
-        numeric = re.match(
-            r"\d+(?:\.\d+)+",
-            raw,
-        )
-
-        if not numeric:
-            return None
-
-        try:
-            return Version(
-                numeric.group(0)
-            )
-        except InvalidVersion:
-            return None
+    return XbpsVersion(raw)
 
 
 def parse_rules(value):
@@ -182,9 +296,9 @@ def load_opml():
     request = urllib.request.Request(
         OPML_URL,
         headers={
-            "User-Agent":
-                "package-update-github-action/1.0",
+            **DEFAULT_HEADERS,
             "Accept": "application/xml, text/xml, */*",
+            **auth_headers(OPML_URL),
         },
     )
 
@@ -279,6 +393,15 @@ def load_feeds():
             get_outline_attribute(
                 outline,
                 "keeplistRules",
+            )
+        )
+
+        keep_rules.extend(
+            parse_rules(
+                get_outline_attribute(
+                    outline,
+                    "keepFilterEntryRules",
+                )
             )
         )
 
@@ -406,6 +529,9 @@ def build_package_map():
         )
 
     for package_dir in sorted(SRC_PKGS.iterdir()):
+        if package_dir.is_symlink():
+            continue
+
         if not package_dir.is_dir():
             continue
 
@@ -527,42 +653,38 @@ def closest_package(feed_name):
     return ", ".join(candidates)
 
 
+TEMPLATE_VERSION_RE = re.compile(
+    r'^version="?([^"\n]+)"?\s*$',
+    re.MULTILINE,
+)
+
+
 def load_repository_versions():
+    """Current version of every package, read from its template.
+    The README table is a generated artifact (`ocoman -u -m`)
+    The template is the source of truth for what is actually built.
+    """
+
     versions = {}
 
-    for line in README_FILE.read_text(
-        encoding="utf-8",
-        errors="replace",
-    ).splitlines():
+    if not SRC_PKGS.is_dir():
+        return versions
 
-        if not line.startswith("|"):
+    for template in sorted(SRC_PKGS.glob("*/template")):
+        if template.parent.is_symlink():
             continue
 
-        columns = [
-            item.strip()
-            for item in (
-                line.strip()
-                .strip("|")
-                .split("|")
+        match = TEMPLATE_VERSION_RE.search(
+            template.read_text(
+                encoding="utf-8",
+                errors="replace",
             )
-        ]
+        )
 
-        if len(columns) < 2:
+        if not match:
             continue
 
-        package = columns[0]
-        version_text = columns[1]
-
-        if (
-            not package
-            or package.lower()
-            == "package"
-            or re.fullmatch(
-                r"[-: ]+",
-                package,
-            )
-        ):
-            continue
+        version_text = match.group(1).strip()
 
         version = extract_version(
             version_text
@@ -570,6 +692,8 @@ def load_repository_versions():
 
         if version is None:
             continue
+
+        package = template.parent.name
 
         versions[
             package.casefold()
@@ -587,14 +711,14 @@ def fetch_feed(feed):
         request = urllib.request.Request(
             feed["xml_url"],
             headers={
-                "User-Agent":
-                    "package-update-github-action/1.0",
+                **DEFAULT_HEADERS,
                 "Accept": (
                     "application/atom+xml, "
                     "application/rss+xml, "
                     "application/xml, "
                     "text/xml, */*"
                 ),
+                **auth_headers(feed["xml_url"]),
             },
         )
 
@@ -666,9 +790,20 @@ def fetch_feed(feed):
         }
 
     except Exception as exc:
+        if isinstance(exc, urllib.error.HTTPError):
+            detail = f"HTTP {exc.code} {exc.reason}"
+
+            if exc.code in (401, 403, 429) and not auth_headers(feed["xml_url"]):
+                detail += " (anonymous; set this forge's token)"
+
+            return {
+                **feed,
+                "error": f"{feed['xml_url']}: {detail}",
+            }
+
         return {
             **feed,
-            "error": str(exc),
+            "error": f"{feed['xml_url']}: {exc}",
         }
 
 
@@ -762,12 +897,46 @@ def issue_version(issue):
     )
 
 
+def load_autobump_packages():
+    """Templates listed in src/autobump-pkgs, i.e. the ones that autobump."""
+    if not AUTOBUMP_PKGS.is_file():
+        log(
+            "WARN",
+            "autobump-pkgs",
+            f"{AUTOBUMP_PKGS} is missing; "
+            "every feed will be marked as not autobump-able",
+        )
+        return set()
+
+    names = set()
+    for line in AUTOBUMP_PKGS.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            names.add(line.casefold())
+
+    log("INFO", "autobump-pkgs", f"{len(names)} package(s)")
+
+    return names
+
+
 def make_body(
     package,
     upstream_version,
     repository_version,
     result,
+    autobump=False,
 ):
+    notice = ""
+    marker = ""
+
+    if not autobump:
+        notice = (
+            "\nAutobump is not enabled for this template "
+            "(not listed in `src/autobump-pkgs`); this issue is a "
+            "head-up only.\n"
+        )
+        marker = "<!-- autobump:no -->\n"
+
     return f"""## Package update
 
 **Package:** `{package}`
@@ -775,7 +944,7 @@ def make_body(
 **Repository version:** `{repository_version}`
 
 **Upstream version:** `{upstream_version}`
-
+{notice}
 ### Source
 
 {result["link"]}
@@ -783,7 +952,7 @@ def make_body(
 <!-- package-update:{package.casefold()} -->
 <!-- upstream-version:{upstream_version} -->
 <!-- source:{result["link"]} -->
-"""
+{marker}"""
 
 
 def ensure_label():
@@ -818,6 +987,7 @@ def create_issue(
     package,
     repository_package,
     result,
+    autobump_packages,
 ):
     upstream = result["version_text"]
     repository = (
@@ -834,6 +1004,9 @@ def create_issue(
         upstream,
         repository,
         result,
+        autobump=(
+            package.casefold() in autobump_packages
+        ),
     )
 
     if DRY_RUN:
@@ -855,10 +1028,27 @@ def create_issue(
             title,
             "--body",
             body,
-            "--label",
-            ISSUE_LABEL,
         ]
     ).strip()
+
+    try:
+        run_gh(
+            [
+                "issue",
+                "edit",
+                url.rsplit("/", 1)[-1],
+                "--repo",
+                TARGET_REPO,
+                "--add-label",
+                ISSUE_LABEL,
+            ]
+        )
+    except RuntimeError as error:
+        log(
+            "WARN",
+            package,
+            f"label {ISSUE_LABEL} not applied: {error}",
+        )
 
     log(
         "CREATE",
@@ -872,6 +1062,7 @@ def update_issue(
     package,
     repository_package,
     result,
+    autobump_packages,
 ):
     upstream = result["version_text"]
     repository = (
@@ -888,6 +1079,9 @@ def update_issue(
         upstream,
         repository,
         result,
+        autobump=(
+            package.casefold() in autobump_packages
+        ),
     )
 
     if DRY_RUN:
@@ -963,6 +1157,7 @@ def process_feed(
     package_map,
     issues,
     stats,
+    autobump_packages,
 ):
     feed_name = result["name"]
 
@@ -1008,7 +1203,7 @@ def process_feed(
             log(
                 "MISS",
                 package,
-                "template exists but no README row",
+                "template exists but has no version= line",
             )
             continue
 
@@ -1066,6 +1261,7 @@ def process_feed(
                     package,
                     repository_package,
                     result,
+                    autobump_packages,
                 )
             else:
                 stats["skip"] += 1
@@ -1100,6 +1296,7 @@ def process_feed(
             package,
             repository_package,
             result,
+            autobump_packages,
         )
 
 
@@ -1108,6 +1305,7 @@ def main():
     repository_versions = (
         load_repository_versions()
     )
+    autobump_packages = load_autobump_packages()
     package_map = build_package_map()
 
     print(
@@ -1166,19 +1364,28 @@ def main():
         key=lambda item:
             item["name"].casefold(),
     ):
+        before = (
+            stats["create"],
+            stats["update"],
+        )
+
         process_feed(
             result,
             repository_versions,
             package_map,
             issues,
             stats,
+            autobump_packages,
         )
 
-        # Refresh after every feed because one
-        # feed can create multiple issues.
 
+        after = (
+            stats["create"],
+            stats["update"],
+        )
 
-        issues = load_issues()
+        if after != before:
+            issues = load_issues()
 
     print()
 

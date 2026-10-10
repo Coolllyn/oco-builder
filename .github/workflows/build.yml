@@ -23,14 +23,36 @@ jobs:
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { name: x86_64, libc: glibc, runner: ubuntu-latest }
-          - { name: x86_64-musl, libc: musl, runner: ubuntu-latest }
-          - { name: aarch64, libc: glibc, runner: ubuntu-24.04-arm }
-          - { name: aarch64-musl, libc: musl, runner: ubuntu-24.04-arm }
+          # Base images are pinned by digest: ':latest' would let an
+          # upstream Void release change underneath a rebuild without
+          # any diff in this repository.  Bump with:
+          #   docker buildx imagetools inspect \
+          #     ghcr.io/void-linux/void-glibc-full:latest
+          - name: x86_64
+            libc: glibc
+            runner: ubuntu-latest
+            base: ghcr.io/void-linux/void-glibc-full@sha256:9533af64ff46c0173b671ebc3477857c622afdb36eaf11f51419adb0a32f9f90
+            base_tag: base-9533af64ff46
+          - name: x86_64-musl
+            libc: musl
+            runner: ubuntu-latest
+            base: ghcr.io/void-linux/void-musl-full@sha256:095e0ec48ceca8ae18148ea81b473cd7a248bf02d5e2adb07a5e87fce3e317ed
+            base_tag: base-095e0ec48ceca
+          - name: aarch64
+            libc: glibc
+            runner: ubuntu-24.04-arm
+            base: ghcr.io/void-linux/void-glibc-full@sha256:9533af64ff46c0173b671ebc3477857c622afdb36eaf11f51419adb0a32f9f90
+            base_tag: base-9533af64ff46
+          - name: aarch64-musl
+            libc: musl
+            runner: ubuntu-24.04-arm
+            base: ghcr.io/void-linux/void-musl-full@sha256:095e0ec48ceca8ae18148ea81b473cd7a248bf02d5e2adb07a5e87fce3e317ed
+            base_tag: base-095e0ec48ceca
 
     steps:
       - name: Checkout repository
@@ -50,13 +72,42 @@ jobs:
             -v "$GITHUB_WORKSPACE:/tmp/oco-builder:ro" \
             -e NAME="${{ matrix.name }}" \
             -e EXTRA_PKGS="${{ matrix.name == 'x86_64' && 'pandoc' || '' }}" \
-            ghcr.io/void-linux/void-${{ matrix.libc }}-full:latest \
+            "${{ matrix.base }}" \
             sh /tmp/oco-builder/bootstrap
 
-      - name: Commit and push
+      - name: Commit image
         run: |
           IMAGE="ghcr.io/osowoso/oco-builder-${{ matrix.name }}"
           docker commit --change='WORKDIR /void-packages' bootstrap "${IMAGE}:latest"
           docker tag "${IMAGE}:latest" "${IMAGE}:${{ github.run_id }}"
+          docker tag "${IMAGE}:latest" "${IMAGE}:${{ matrix.base_tag }}"
+
+      - name: Smoke test
+        run: |
+          IMAGE="ghcr.io/osowoso/oco-builder-${{ matrix.name }}:latest"
+          # Nothing ever ran the produced image before pushing it, so a
+          # broken xbps-src or a missing masterdir became the :latest
+          # that oco/.github/workflows/build.yml builds every package
+          # with.  Fail here instead.
+          docker run --rm --pull=never "$IMAGE" bash -euc '
+            test -x /void-packages/xbps-src || {
+              echo "missing /void-packages/xbps-src" >&2; exit 1; }
+            for tool in xbps-uhelper oco-prepare; do
+              command -v "$tool" >/dev/null || {
+                echo "missing $tool" >&2; exit 1; }
+            done
+            xbps-uhelper cmpver 1.0 1.0
+            test -d /void-packages/hostdir
+            compgen -G "/void-packages/masterdir-*" >/dev/null
+            compgen -G "/void-packages/common/repo-keys/*.plist" >/dev/null
+            test -f /etc/xbps.d/oco.conf
+          '
+
+      - name: Push
+        run: |
+          IMAGE="ghcr.io/osowoso/oco-builder-${{ matrix.name }}"
+          # Also tagged by the base digest, so a published image can be
+          # traced back to the exact Void release it was built from.
           docker push "${IMAGE}:latest"
           docker push "${IMAGE}:${{ github.run_id }}"
+          docker push "${IMAGE}:${{ matrix.base_tag }}"
