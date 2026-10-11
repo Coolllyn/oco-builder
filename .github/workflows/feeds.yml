@@ -24,12 +24,6 @@ env:
   TARGET_BRANCH: OCO
   OCO_REPO: https://github.com/oSoWoSo/vOid_Community_repOsitory.git
   OCO_LABEL: package-update
-  # feedsparser defaults to "feeds.opml" in its own root, which does not exist
-  # here, so it would fall back to fetching the OPML from raw.githubusercontent
-  # -- while the very same file sits in the OCO checkout one step up. Reading
-  # the clone also closes the window where the remote OPML and the templates
-  # we compare against come from two different moments in time.
-  OPML_PATH: ${{ runner.temp }}/oco/src/feed.opml
 
 jobs:
   package-update:
@@ -59,6 +53,7 @@ jobs:
 
       - name: Check package updates
         env:
+          OPML_PATH: ${{ runner.temp }}/oco/src/feed.opml
           GH_TOKEN: ${{ secrets.BOT }}
           GITHUB_TOKEN: ${{ secrets.BOT }}
           CODEBERG_TOKEN: ${{ secrets.CODEBERG }}
