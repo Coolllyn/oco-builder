@@ -20,8 +20,14 @@ cp /usr/share/xbps.d/*-repository-*.conf /etc/xbps.d/
 sed -i 's|repo-default|repo-ci|g' /etc/xbps.d/*-repository-*.conf
 xbps_install_retry -Syu xbps
 xbps_install_retry -yu
+# GitHub-hosted Node action runtimes use the glibc ELF interpreter, even
+# when the job container is based on musl.
+case "$NAME" in
+	*-musl) MUSL_COMPAT=gcompat ;;
+	*) MUSL_COMPAT= ;;
+esac
 # shellcheck disable=SC2086
-xbps_install_retry -y sudo bash curl git nodejs python3 xtools zstd ${EXTRA_PKGS:-}
+xbps_install_retry -y sudo bash curl git nodejs python3 xtools zstd ${MUSL_COMPAT} ${EXTRA_PKGS:-}
 useradd -G xbuilder -M builder
 git clone --depth 1 https://github.com/void-linux/void-packages.git /void-packages
 chown -R builder:builder /void-packages

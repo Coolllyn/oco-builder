@@ -96,6 +96,15 @@ jobs:
               command -v "$tool" >/dev/null || {
                 echo "missing $tool" >&2; exit 1; }
             done
+            if [ "${{ matrix.libc }}" = musl ]; then
+              case "$(uname -m)" in
+                aarch64) loader=/lib/ld-linux-aarch64.so.1 ;;
+                x86_64) loader=/lib/ld-linux-x86-64.so.2 ;;
+                *) echo "unsupported musl architecture: $(uname -m)" >&2; exit 1 ;;
+              esac
+              test -x "$loader" || {
+                echo "missing glibc compatibility loader: $loader" >&2; exit 1; }
+            fi
             xbps-uhelper cmpver 1.0 1.0
             test -d /void-packages/hostdir
             compgen -G "/void-packages/masterdir-*" >/dev/null
