@@ -2,7 +2,7 @@
 
 Bootstrap Docker images for building binary packages for [repo.osowoso.org](https://repo.osowoso.org/)
 
-Templates live at [OCO](https://github.com/oSoWoSo/vOid_Community_repOsitory) (mirrored to [Codeberg](https://codeberg.org/oSoWoSo/oco)); binaries are built via CI on GitHub using these images.
+Templates live at [OCO](https://github.com/oSoWoSo/oco) (mirrored to [Codeberg](https://codeberg.org/oSoWoSo/oco)); binaries are built via CI on GitHub using these images.
 
 ## Images
 

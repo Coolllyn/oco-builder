@@ -20,9 +20,9 @@ permissions:
   issues: write
 
 env:
-  TARGET_REPO: oSoWoSo/vOid_Community_repOsitory
+  TARGET_REPO: oSoWoSo/oco
   TARGET_BRANCH: OCO
-  OCO_REPO: https://github.com/oSoWoSo/vOid_Community_repOsitory.git
+  OCO_REPO: https://github.com/oSoWoSo/oco.git
   OCO_LABEL: package-update
 
 jobs:

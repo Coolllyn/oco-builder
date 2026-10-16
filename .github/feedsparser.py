@@ -22,7 +22,7 @@ OPML_PATH = os.environ.get(
 OPML_URL = os.environ.get(
     "OPML_URL",
     "https://raw.githubusercontent.com/"
-    "oSoWoSo/vOid_Community_repOsitory/"
+    "oSoWoSo/oco/"
     "refs/heads/OCO/src/feed.opml",
 )
 FOLDER_NAME = "package-update"
