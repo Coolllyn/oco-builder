@@ -65,11 +65,13 @@ int fcntl64(int fd, int command, ...)
 
 	va_start(arguments, command);
 	if (has_no_argument(command)) {
-		result = fcntl(fd, command);
+		result = fcntl(fd, command, 0UL);
 	} else if (has_integer_argument(command)) {
-		result = fcntl(fd, command, va_arg(arguments, int));
+		result = fcntl(fd, command,
+			(unsigned long)(long)va_arg(arguments, int));
 	} else {
-		result = fcntl(fd, command, va_arg(arguments, void *));
+		result = fcntl(fd, command,
+			(unsigned long)va_arg(arguments, void *));
 	}
 	va_end(arguments);
 	return result;
