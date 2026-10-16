@@ -36,6 +36,9 @@ In addition to the void base + `xbps-src`, the images include:
 - `surfer-cli` -- for managing repository
 - `zstd` -- CLI for round-tripping zstd-compressed repodata
 
+The `aarch64-musl` image additionally preloads a small `fcntl64` ABI bridge
+for GitHub Actions' glibc-linked ARM Node runtime; other images are unchanged.
+
 x86\_64 only
 - `pandoc` -- README → HTML for the oco website generator
 

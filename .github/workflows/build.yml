@@ -78,7 +78,11 @@ jobs:
       - name: Commit image
         run: |
           IMAGE="ghcr.io/osowoso/oco-builder-${{ matrix.name }}"
-          docker commit --change='WORKDIR /void-packages' bootstrap "${IMAGE}:latest"
+          changes=(--change='WORKDIR /void-packages')
+          if [ "${{ matrix.name }}" = aarch64-musl ]; then
+            changes+=(--change='ENV LD_PRELOAD=/usr/lib/liboco-fcntl64.so')
+          fi
+          docker commit "${changes[@]}" bootstrap "${IMAGE}:latest"
           docker tag "${IMAGE}:latest" "${IMAGE}:${{ github.run_id }}"
           docker tag "${IMAGE}:latest" "${IMAGE}:${{ matrix.base_tag }}"
 
@@ -89,7 +93,13 @@ jobs:
           # broken xbps-src or a missing masterdir became the :latest
           # that oco/.github/workflows/build.yml builds every package
           # with.  Fail here instead.
-          docker run --rm --pull=never "$IMAGE" bash -euc '
+          smoke_args=()
+          if [ "${{ matrix.name }}" = aarch64-musl ]; then
+            smoke_args+=(--volume "$GITHUB_WORKSPACE:/tmp/oco-builder:ro")
+          fi
+          docker run --rm --pull=never \
+            "${smoke_args[@]}" \
+            "$IMAGE" bash -euc '
             test -x /void-packages/xbps-src || {
               echo "missing /void-packages/xbps-src" >&2; exit 1; }
             for tool in xbps-uhelper oco-prepare; do
@@ -104,6 +114,13 @@ jobs:
               esac
               test -x "$loader" || {
                 echo "missing glibc compatibility loader: $loader" >&2; exit 1; }
+            fi
+            if [ "${{ matrix.name }}" = aarch64-musl ]; then
+              test "$LD_PRELOAD" = /usr/lib/liboco-fcntl64.so
+              cc -Wall -Wextra -Werror \
+                -o /tmp/fcntl64-smoke \
+                /tmp/oco-builder/tests/fcntl64-smoke.c -ldl
+              /tmp/fcntl64-smoke
             fi
             xbps-uhelper cmpver 1.0 1.0
             test -d /void-packages/hostdir
