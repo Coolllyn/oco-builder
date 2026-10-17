@@ -121,7 +121,7 @@ jobs:
               test -x /__e/node24/bin/node || {
                 echo "missing GitHub Actions Node 24 runtime" >&2; exit 1; }
               /__e/node24/bin/node -e \
-                'require("fs"); require("child_process"); console.log("Node 24 action runtime OK")'
+                "require(\"fs\"); require(\"child_process\"); console.log(\"Node 24 action runtime OK\")"
               cc -Wall -Wextra -Werror \
                 -o /tmp/fcntl64-smoke \
                 /tmp/oco-builder/tests/fcntl64-smoke.c -ldl
