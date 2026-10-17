@@ -7,6 +7,5 @@
 !/bootstrap
 !/oco-prepare
 !/requirements.txt
-!/fcntl64-compat.c
 !/tests
 tests/__pycache__/

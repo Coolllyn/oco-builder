@@ -75,14 +75,35 @@ jobs:
             "${{ matrix.base }}" \
             sh /tmp/oco-builder/bootstrap
 
+      - name: Stage glibc runtime for aarch64-musl
+        if: matrix.name == 'aarch64-musl'
+        run: |
+          STAGE="$RUNNER_TEMP/oco-glibc-root"
+          mkdir -p "$STAGE/usr/lib/oco-glibc" "$STAGE/etc/ld.so.conf.d" "$STAGE/lib"
+          docker run --rm \
+            --volume "$HOME/extracted/externals:/__e:ro" \
+            --volume "$STAGE:/stage" \
+            ghcr.io/void-linux/void-glibc-full@sha256:9533af64ff46c0173b671ebc3477857c622afdb36eaf11f51419adb0a32f9f90 \
+            sh -euc '
+              ldd /__e/node24/bin/node
+              ldd /__e/node24/bin/node | awk '"'"'$2 == "=>" && $3 ~ /^\// { print $3 } $1 ~ /^\// { print $1 }'"'"' |
+                sort -u |
+                while IFS= read -r library; do
+                  test -f "$library"
+                  cp -L "$library" "/stage/usr/lib/oco-glibc/$(basename "$library")"
+                done
+              cp -L /lib/ld-linux-aarch64.so.1 /stage/lib/ld-linux-aarch64.so.1
+              printf "%s\n" /usr/lib/oco-glibc > /stage/etc/ld.so.conf.d/oco-glibc.conf
+              ldconfig -r /stage
+            '
+          docker cp "$STAGE/usr/lib/oco-glibc" bootstrap:/usr/lib/oco-glibc
+          docker cp "$STAGE/lib/ld-linux-aarch64.so.1" bootstrap:/lib/ld-linux-aarch64.so.1
+          docker cp "$STAGE/etc/ld.so.cache" bootstrap:/etc/ld.so.cache
+
       - name: Commit image
         run: |
           IMAGE="ghcr.io/osowoso/oco-builder-${{ matrix.name }}"
-          changes=(--change='WORKDIR /void-packages')
-          if [ "${{ matrix.name }}" = aarch64-musl ]; then
-            changes+=(--change='ENV LD_PRELOAD=/usr/lib/liboco-fcntl64.so')
-          fi
-          docker commit "${changes[@]}" bootstrap "${IMAGE}:latest"
+          docker commit --change='WORKDIR /void-packages' bootstrap "${IMAGE}:latest"
           docker tag "${IMAGE}:latest" "${IMAGE}:${{ github.run_id }}"
           docker tag "${IMAGE}:latest" "${IMAGE}:${{ matrix.base_tag }}"
 
@@ -95,7 +116,6 @@ jobs:
           # with.  Fail here instead.
           smoke_args=()
           if [ "${{ matrix.name }}" = aarch64-musl ]; then
-            smoke_args+=(--volume "$GITHUB_WORKSPACE:/tmp/oco-builder:ro")
             smoke_args+=(--volume "$HOME/extracted/externals:/__e:ro")
           fi
           docker run --rm --pull=never \
@@ -117,15 +137,13 @@ jobs:
                 echo "missing glibc compatibility loader: $loader" >&2; exit 1; }
             fi
             if [ "${{ matrix.name }}" = aarch64-musl ]; then
-              test "$LD_PRELOAD" = /usr/lib/liboco-fcntl64.so
+              test -x /lib/ld-musl-aarch64.so.1 || {
+                echo "missing musl loader: /lib/ld-musl-aarch64.so.1" >&2; exit 1; }
+
               test -x /__e/node24/bin/node || {
                 echo "missing GitHub Actions Node 24 runtime" >&2; exit 1; }
               /__e/node24/bin/node -e \
                 "require(\"fs\"); require(\"child_process\"); console.log(\"Node 24 action runtime OK\")"
-              cc -Wall -Wextra -Werror \
-                -o /tmp/fcntl64-smoke \
-                /tmp/oco-builder/tests/fcntl64-smoke.c -ldl
-              /tmp/fcntl64-smoke
             fi
             xbps-uhelper cmpver 1.0 1.0
             test -d /void-packages/hostdir

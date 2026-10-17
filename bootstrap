@@ -21,21 +21,15 @@ sed -i 's|repo-default|repo-ci|g' /etc/xbps.d/*-repository-*.conf
 xbps_install_retry -Syu xbps
 xbps_install_retry -yu
 # GitHub-hosted Node action runtimes use the glibc ELF interpreter, even
-# when the job container is based on musl.
+# when the job container is based on musl.  The aarch64-musl image gets a
+# private glibc runtime staged by the workflow; x86_64-musl keeps gcompat.
 case "$NAME" in
-	*-musl) MUSL_COMPAT=gcompat ;;
+	x86_64-musl) MUSL_COMPAT=gcompat ;;
 	*) MUSL_COMPAT= ;;
 esac
 # shellcheck disable=SC2086
 xbps_install_retry -y sudo bash curl git nodejs python3 xtools zstd ${MUSL_COMPAT} ${EXTRA_PKGS:-}
 
-if [ "$NAME" = aarch64-musl ]; then
-	xbps_install_retry -y gcc
-	cc -O2 -fPIC -shared \
-		-Wl,-soname,liboco-fcntl64.so \
-		-o /usr/lib/liboco-fcntl64.so \
-		/tmp/oco-builder/fcntl64-compat.c
-fi
 useradd -G xbuilder -M builder
 git clone --depth 1 https://github.com/void-linux/void-packages.git /void-packages
 chown -R builder:builder /void-packages
