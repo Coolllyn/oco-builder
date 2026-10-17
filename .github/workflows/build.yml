@@ -79,7 +79,7 @@ jobs:
         if: matrix.name == 'aarch64-musl'
         run: |
           STAGE="$RUNNER_TEMP/oco-glibc-root"
-          mkdir -p "$STAGE/usr/lib/oco-glibc" "$STAGE/etc/ld.so.conf.d" "$STAGE/lib"
+          mkdir -p "$STAGE/usr/lib/oco-glibc" "$STAGE/etc" "$STAGE/lib"
           docker run --rm \
             --volume "$HOME/extracted/externals:/__e:ro" \
             --volume "$STAGE:/stage" \
@@ -94,7 +94,7 @@ jobs:
                   cp -L "$library" "/stage/usr/lib/oco-glibc/$(basename "$library")"
                 done
               cp -L /lib/ld-linux-aarch64.so.1 /stage/lib/ld-linux-aarch64.so.1
-              printf "%s\n" /usr/lib/oco-glibc > /stage/etc/ld.so.conf.d/oco-glibc.conf
+              printf "%s\n" /usr/lib/oco-glibc > /stage/etc/ld.so.conf
               ldconfig -r /stage
             '
           docker cp "$STAGE/usr/lib/oco-glibc" bootstrap:/usr/lib/oco-glibc
