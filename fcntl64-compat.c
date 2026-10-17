@@ -1,6 +1,8 @@
 #define _GNU_SOURCE
 #include <fcntl.h>
 #include <stdarg.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 static int has_no_argument(int command)
 {
@@ -57,22 +59,22 @@ static int has_integer_argument(int command)
 	}
 }
 
-/* fcntl and fcntl64 share the same ABI on 64-bit musl. */
+/* Forward fcntl64 requests directly to the kernel. */
 int fcntl64(int fd, int command, ...)
 {
 	va_list arguments;
-	int result;
+	long result;
 
 	va_start(arguments, command);
 	if (has_no_argument(command)) {
-		result = fcntl(fd, command, 0UL);
+		result = syscall(SYS_fcntl, fd, command, 0UL);
 	} else if (has_integer_argument(command)) {
-		result = fcntl(fd, command,
+		result = syscall(SYS_fcntl, fd, command,
 			(unsigned long)(long)va_arg(arguments, int));
 	} else {
-		result = fcntl(fd, command,
+		result = syscall(SYS_fcntl, fd, command,
 			(unsigned long)va_arg(arguments, void *));
 	}
 	va_end(arguments);
-	return result;
+	return (int)result;
 }
