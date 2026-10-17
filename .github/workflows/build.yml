@@ -85,8 +85,9 @@ jobs:
             --volume "$STAGE:/stage" \
             ghcr.io/void-linux/void-glibc-full@sha256:9533af64ff46c0173b671ebc3477857c622afdb36eaf11f51419adb0a32f9f90 \
             sh -euc '
-              ldd /__e/node24/bin/node
-              ldd /__e/node24/bin/node | awk '"'"'$2 == "=>" && $3 ~ /^\// { print $3 } $1 ~ /^\// { print $1 }'"'"' |
+              /lib/ld-linux-aarch64.so.1 --list /__e/node24/bin/node
+              /lib/ld-linux-aarch64.so.1 --list /__e/node24/bin/node |
+                awk '"'"'$2 == "=>" && $3 ~ /^\// { print $3 } $1 ~ /^\// { print $1 }'"'"' |
                 sort -u |
                 while IFS= read -r library; do
                   test -f "$library"
