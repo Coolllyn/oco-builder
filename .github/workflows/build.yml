@@ -28,30 +28,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Base images are pinned by digest: ':latest' would let an
-          # upstream Void release change underneath a rebuild without
-          # any diff in this repository.  Bump with:
-          #   docker buildx imagetools inspect \
-          #     ghcr.io/void-linux/void-glibc-full:latest
           - name: x86_64
             libc: glibc
             runner: ubuntu-latest
-            base: ghcr.io/void-linux/void-glibc-full@sha256:9533af64ff46c0173b671ebc3477857c622afdb36eaf11f51419adb0a32f9f90
+            base: ghcr.io/void-linux/void-glibc-full:latest
             base_tag: base-9533af64ff46
           - name: x86_64-musl
             libc: musl
             runner: ubuntu-latest
-            base: ghcr.io/void-linux/void-musl-full@sha256:095e0ec48ceca8ae18148ea81b473cd7a248bf02d5e2adb07a5e87fce3e317ed
+            base: ghcr.io/void-linux/void-musl-full:latest
             base_tag: base-095e0ec48ceca
           - name: aarch64
             libc: glibc
             runner: ubuntu-24.04-arm
-            base: ghcr.io/void-linux/void-glibc-full@sha256:9533af64ff46c0173b671ebc3477857c622afdb36eaf11f51419adb0a32f9f90
+            base: ghcr.io/void-linux/void-glibc-full:latest
             base_tag: base-9533af64ff46
           - name: aarch64-musl
             libc: musl
             runner: ubuntu-24.04-arm
-            base: ghcr.io/void-linux/void-musl-full@sha256:095e0ec48ceca8ae18148ea81b473cd7a248bf02d5e2adb07a5e87fce3e317ed
+            base: ghcr.io/void-linux/void-musl-full:latest
             base_tag: base-095e0ec48ceca
 
     steps:
@@ -83,7 +78,7 @@ jobs:
           docker run --rm \
             --volume "$HOME/extracted/externals:/__e:ro" \
             --volume "$STAGE:/stage" \
-            ghcr.io/void-linux/void-glibc-full@sha256:9533af64ff46c0173b671ebc3477857c622afdb36eaf11f51419adb0a32f9f90 \
+            ghcr.io/void-linux/void-glibc-full:latest \
             sh -euc '
               /lib/ld-linux-aarch64.so.1 --list /__e/node24/bin/node
               /lib/ld-linux-aarch64.so.1 --list /__e/node24/bin/node |
